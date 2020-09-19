@@ -1,7 +1,10 @@
 // use elementtree::Element;
+use reqwest;
 use roxmltree;
 use std::collections::HashMap;
 use std::fs;
+
+use futures::executor::block_on;
 
 #[derive(Debug)]
 struct TileMatrix {
@@ -67,8 +70,24 @@ impl TileMatrix {
     }
 }
 
-fn parse_wmts_xml(path: &str) -> (String, HashMap<String, TileMatrix>) {
-    let mut resource_url = String::new();
+struct ResourceURL {
+    template: String,
+}
+
+impl ResourceURL {
+    fn get_tile_url(&self, matrix_id: &str, column: u32, row: u32) -> String {
+        let str_with_matrix_id = self.template.replace("{TileMatrix}", matrix_id);
+        let str_with_column = str_with_matrix_id.replace("{TileCol}", &column.to_string());
+        let complete_url = str_with_column.replace("{TileRow}", &row.to_string());
+
+        complete_url
+    }
+}
+
+fn parse_wmts_xml(path: &str) -> (ResourceURL, HashMap<String, TileMatrix>) {
+    let mut resource_url = ResourceURL {
+        template: String::new(),
+    };
 
     let wmts_document = fs::read_to_string(path).unwrap();
 
@@ -88,9 +107,9 @@ fn parse_wmts_xml(path: &str) -> (String, HashMap<String, TileMatrix>) {
             .unwrap();
 
         if let Some(url) = resource_url_node.attribute("template") {
-            resource_url = String::from(url);
+            resource_url.template = String::from(url);
         }
-        println!("tag name {:?}", resource_url);
+        println!("tag name {:?}", resource_url.template);
 
         let tile_matrix_set_node = content_node
             .children()
@@ -98,9 +117,7 @@ fn parse_wmts_xml(path: &str) -> (String, HashMap<String, TileMatrix>) {
             .unwrap();
         for item in tile_matrix_set_node.children() {
             if item.tag_name().name() == "TileMatrix" {
-                println!("ITEM {:?}", item.tag_name().name());
                 let tm = TileMatrix::from_node(item);
-                println!("tilematrix: {:?}", &tm);
 
                 tile_matrix_map.insert(tm.identifier.clone(), tm);
             }
@@ -109,6 +126,21 @@ fn parse_wmts_xml(path: &str) -> (String, HashMap<String, TileMatrix>) {
     (resource_url, tile_matrix_map)
 }
 
+fn do_request(url: String) -> Result<(), Box<dyn std::error::Error>> {
+    let body = reqwest::blocking::get(&url)?;
+
+    // TODO: Save body as image
+    println!("body = {:?}", body.bytes());
+
+    Ok(())
+}
+
 fn main() {
     let (resource_url, tile_matrix_map) = parse_wmts_xml("wmts.xml");
+
+    let tile_url = resource_url.get_tile_url("0", 0, 0);
+
+    println!("tile url: {}", tile_url);
+
+    do_request(tile_url);
 }
