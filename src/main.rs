@@ -1,10 +1,16 @@
 // use elementtree::Element;
+use bytes;
+use futures::executor::block_on;
+use image;
 use reqwest;
 use roxmltree;
 use std::collections::HashMap;
 use std::fs;
 
-use futures::executor::block_on;
+use piston_window::{
+    clear, image as piston_image, G2dTexture, OpenGL, PistonWindow, Texture, TextureSettings,
+    WindowSettings,
+};
 
 #[derive(Debug)]
 struct TileMatrix {
@@ -126,13 +132,13 @@ fn parse_wmts_xml(path: &str) -> (ResourceURL, HashMap<String, TileMatrix>) {
     (resource_url, tile_matrix_map)
 }
 
-fn do_request(url: String) -> Result<(), Box<dyn std::error::Error>> {
+fn fetch_tile(url: String) -> Result<bytes::Bytes, Box<dyn std::error::Error>> {
     let body = reqwest::blocking::get(&url)?;
 
     // TODO: Save body as image
-    println!("body = {:?}", body.bytes());
+    // println!("body = {:?}", body.bytes());
 
-    Ok(())
+    Ok(body.bytes()?)
 }
 
 fn main() {
@@ -142,5 +148,32 @@ fn main() {
 
     println!("tile url: {}", tile_url);
 
-    do_request(tile_url);
+    let tile_bytes = fetch_tile(tile_url).unwrap();
+
+    let tile_image = image::load_from_memory(&tile_bytes).unwrap().to_rgba();
+
+    println!("{:?}", tile_image.height());
+
+    let opengl = OpenGL::V3_2;
+    let mut window: PistonWindow =
+        WindowSettings::new("piston: image", [tile_image.width(), tile_image.height()])
+            .exit_on_esc(true)
+            .graphics_api(opengl)
+            .build()
+            .unwrap();
+
+    let tile_texture: G2dTexture = Texture::from_image(
+        &mut window.create_texture_context(),
+        &tile_image,
+        &TextureSettings::new(),
+    )
+    .unwrap();
+
+    // window.set_lazy(true);
+    while let Some(e) = window.next() {
+        window.draw_2d(&e, |c, g, _| {
+            clear([1.0; 4], g);
+            piston_image(&tile_texture, c.transform, g);
+        });
+    }
 }
