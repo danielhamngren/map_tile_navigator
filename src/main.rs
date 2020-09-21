@@ -1,16 +1,14 @@
 // use elementtree::Element;
+use ::image as image_image;
 use bytes;
-use futures::executor::block_on;
-use image;
 use reqwest;
 use roxmltree;
 use std::collections::HashMap;
+use std::error::Error;
 use std::fs;
 
-use piston_window::{
-    clear, image as piston_image, G2dTexture, OpenGL, PistonWindow, Texture, TextureSettings,
-    WindowSettings,
-};
+use gfx_device_gl::{CommandBuffer, Factory, Resources};
+use piston_window::*;
 
 #[derive(Debug)]
 struct TileMatrix {
@@ -90,6 +88,111 @@ impl ResourceURL {
     }
 }
 
+// TODO: Check with a tile matrix if a certain tile is valid
+struct TileManager {
+    tile_texture: Option<G2dTexture>,
+    current_row: u32,
+    current_column: u32,
+    current_matrix_id: String,
+    resource_url: ResourceURL,
+    texture_context: TextureContext<Factory, Resources, CommandBuffer>,
+    texture_settings: TextureSettings,
+}
+
+impl TileManager {
+    fn zoom_in(&mut self, quadrant: Quadrant) {
+        self.next_matrix(); //
+
+        //
+        match quadrant {
+            Quadrant::I => {
+                self.current_row = 2 * self.current_row;
+                self.current_column = 2 * self.current_column + 1;
+            }
+            Quadrant::II => {
+                self.current_row = 2 * self.current_row;
+                self.current_column = 2 * self.current_column;
+            }
+            Quadrant::III => {
+                self.current_row = 2 * self.current_row + 1;
+                self.current_column = 2 * self.current_column;
+            }
+            Quadrant::VI => {
+                self.current_row = 2 * self.current_row + 1;
+                self.current_column = 2 * self.current_column + 1;
+            }
+        }
+
+        self.update_texture();
+    }
+
+    fn travel(&mut self, movement: Movement) {
+        match movement {
+            Movement::Up => self.current_row -= 1,
+            Movement::Down => self.current_row += 1,
+            Movement::Left => self.current_column -= 1,
+            Movement::Right => self.current_column += 1,
+        }
+
+        self.update_texture();
+    }
+
+    fn zoom_out(&mut self) {
+        self.prev_matrix();
+
+        self.current_column /= 2;
+        self.current_row /= 2;
+
+        self.update_texture();
+    }
+
+    fn next_matrix(&mut self) {
+        self.current_matrix_id = (self.current_matrix_id.parse::<u32>().unwrap() + 1).to_string();
+    }
+
+    fn prev_matrix(&mut self) {
+        self.current_matrix_id = (self.current_matrix_id.parse::<u32>().unwrap() - 1).to_string();
+    }
+
+    fn update_texture(&mut self) {
+        let tile_url = self.resource_url.get_tile_url(
+            &self.current_matrix_id,
+            self.current_column,
+            self.current_row,
+        );
+
+        let tile_bytes = fetch_tile(tile_url).unwrap();
+        let tile_image = image_image::load_from_memory(&tile_bytes)
+            .unwrap()
+            .to_rgba();
+
+        // This isn't really how I want to do it. There exists a method for the texture struct
+        // which is .update(context, image) but I haven't been able to use that yet.
+        let tile_texture: G2dTexture = Texture::from_image(
+            &mut self.texture_context,
+            &tile_image,
+            &self.texture_settings,
+        )
+        .unwrap();
+
+        self.tile_texture = Option::from(tile_texture);
+    }
+}
+
+enum Quadrant {
+    I,
+    II,
+    III,
+    VI,
+}
+
+enum Movement {
+    Up,
+    Down,
+    Left,
+    Right,
+}
+
 fn parse_wmts_xml(path: &str) -> (ResourceURL, HashMap<String, TileMatrix>) {
     let mut resource_url = ResourceURL {
         template: String::new(),
@@ -115,7 +218,6 @@ fn parse_wmts_xml(path: &str) -> (ResourceURL, HashMap<String, TileMatrix>) {
         if let Some(url) = resource_url_node.attribute("template") {
             resource_url.template = String::from(url);
         }
-        println!("tag name {:?}", resource_url.template);
 
         let tile_matrix_set_node = content_node
             .children()
@@ -134,46 +236,85 @@ fn parse_wmts_xml(path: &str) -> (ResourceURL, HashMap<String, TileMatrix>) {
 
 fn fetch_tile(url: String) -> Result<bytes::Bytes, Box<dyn std::error::Error>> {
     let body = reqwest::blocking::get(&url)?;
-
-    // TODO: Save body as image
-    // println!("body = {:?}", body.bytes());
-
     Ok(body.bytes()?)
 }
 
-fn main() {
+fn main() -> Result<(), Box<dyn Error>> {
+    // TODO: Take argument for which WMTS to access and load that XML response.
     let (resource_url, tile_matrix_map) = parse_wmts_xml("wmts.xml");
 
-    let tile_url = resource_url.get_tile_url("0", 0, 0);
-
-    println!("tile url: {}", tile_url);
-
-    let tile_bytes = fetch_tile(tile_url).unwrap();
-
-    let tile_image = image::load_from_memory(&tile_bytes).unwrap().to_rgba();
-
-    println!("{:?}", tile_image.height());
+    let tile_width = tile_matrix_map.get("0").unwrap().tile_width;
+    let tile_height = tile_matrix_map.get("0").unwrap().tile_height;
 
     let opengl = OpenGL::V3_2;
-    let mut window: PistonWindow =
-        WindowSettings::new("piston: image", [tile_image.width(), tile_image.height()])
-            .exit_on_esc(true)
-            .graphics_api(opengl)
-            .build()
-            .unwrap();
+    let mut window: PistonWindow = WindowSettings::new("piston: image", [tile_width, tile_height])
+        .exit_on_esc(true)
+        .graphics_api(opengl)
+        .build()
+        .unwrap();
 
-    let tile_texture: G2dTexture = Texture::from_image(
-        &mut window.create_texture_context(),
-        &tile_image,
-        &TextureSettings::new(),
-    )
-    .unwrap();
+    let context = window.create_texture_context();
 
-    // window.set_lazy(true);
+    window.set_lazy(true);
+
+    let mut tm = TileManager {
+        tile_texture: None,
+        current_row: 0,
+        current_column: 0,
+        current_matrix_id: String::from("0"),
+        resource_url: resource_url,
+        texture_context: context,
+        texture_settings: TextureSettings::new(),
+    };
+
+    tm.update_texture();
+    let line = Line::new([0.5, 0.5, 0.5, 0.5], 0.5);
+
     while let Some(e) = window.next() {
+        if let Some(Button::Keyboard(key)) = e.release_args() {
+            match key {
+                Key::W => tm.zoom_in(Quadrant::I),
+                Key::Q => tm.zoom_in(Quadrant::II),
+                Key::A => tm.zoom_in(Quadrant::III),
+                Key::R => tm.zoom_in(Quadrant::VI),
+                Key::Up => tm.travel(Movement::Up),
+                Key::Down => tm.travel(Movement::Down),
+                Key::Right => tm.travel(Movement::Right),
+                Key::Left => tm.travel(Movement::Left),
+                Key::Space => tm.zoom_out(),
+                _ => {}
+            }
+        }
         window.draw_2d(&e, |c, g, _| {
             clear([1.0; 4], g);
-            piston_image(&tile_texture, c.transform, g);
+            // image(&tile_texture, c.transform, g);
+            if let Some(texture) = &tm.tile_texture {
+                image(texture, c.transform, g);
+            }
+            line.draw(
+                [
+                    tile_width as f64 / 2.0,
+                    0.0,
+                    tile_width as f64 / 2.0,
+                    tile_height as f64,
+                ],
+                &c.draw_state,
+                c.transform,
+                g,
+            );
+            line.draw(
+                [
+                    0.0,
+                    tile_height as f64 / 2.0,
+                    tile_width as f64,
+                    tile_height as f64 / 2.0,
+                ],
+                &c.draw_state,
+                c.transform,
+                g,
+            );
         });
     }
+
+    Ok(())
 }
