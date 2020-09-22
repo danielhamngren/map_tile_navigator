@@ -1,8 +1,12 @@
 [package]
-name = "reading_xml"
+name = "tile-map-navigator"
 version = "0.1.0"
 authors = ["danielhamngren <daniel.hamngren@gmail.com>"]
+license = "AGPL-3.0"
+keywords = ["WMTS", "GIS"]
+categories = ["visualization"]
 edition = "2018"
+publish = false
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -14,3 +18,4 @@ image = "0.23.9"
 bytes = "0.5"
 piston_window = "0.113.0"
 gfx_device_gl = "0.16.2"
+structopt = "0.3"

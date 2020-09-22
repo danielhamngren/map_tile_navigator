@@ -5,7 +5,7 @@ use reqwest;
 use roxmltree;
 use std::collections::HashMap;
 use std::error::Error;
-use std::fs;
+use structopt::StructOpt;
 
 use gfx_device_gl::{CommandBuffer, Factory, Resources};
 use piston_window::*;
@@ -193,14 +193,12 @@ enum Movement {
     Right,
 }
 
-fn parse_wmts_xml(path: &str) -> (ResourceURL, HashMap<String, TileMatrix>) {
+fn parse_wmts_xml(wmts_document: &str) -> (ResourceURL, HashMap<String, TileMatrix>) {
     let mut resource_url = ResourceURL {
         template: String::new(),
     };
 
-    let wmts_document = fs::read_to_string(path).unwrap();
-
-    let doc = roxmltree::Document::parse(&wmts_document).unwrap();
+    let doc = roxmltree::Document::parse(wmts_document).unwrap();
 
     let mut tile_matrix_map = HashMap::new();
 
@@ -239,19 +237,30 @@ fn fetch_tile(url: String) -> Result<bytes::Bytes, Box<dyn std::error::Error>> {
     Ok(body.bytes()?)
 }
 
+#[derive(StructOpt, Debug)]
+#[structopt(name = "Map tile navigator")]
+struct Opt {
+    #[structopt(long, env = "WMTS_URL")]
+    wmts_url: String,
+}
+
 fn main() -> Result<(), Box<dyn Error>> {
-    // TODO: Take argument for which WMTS to access and load that XML response.
-    let (resource_url, tile_matrix_map) = parse_wmts_xml("wmts.xml");
+    let opt = Opt::from_args();
+
+    let wmts_capabilities_xml = reqwest::blocking::get(&opt.wmts_url)?;
+
+    let (resource_url, tile_matrix_map) = parse_wmts_xml(&wmts_capabilities_xml.text()?);
 
     let tile_width = tile_matrix_map.get("0").unwrap().tile_width;
     let tile_height = tile_matrix_map.get("0").unwrap().tile_height;
 
     let opengl = OpenGL::V3_2;
-    let mut window: PistonWindow = WindowSettings::new("piston: image", [tile_width, tile_height])
-        .exit_on_esc(true)
-        .graphics_api(opengl)
-        .build()
-        .unwrap();
+    let mut window: PistonWindow =
+        WindowSettings::new("Map tile navigator", [tile_width, tile_height])
+            .exit_on_esc(true)
+            .graphics_api(opengl)
+            .build()
+            .unwrap();
 
     let context = window.create_texture_context();
 
@@ -276,18 +285,19 @@ fn main() -> Result<(), Box<dyn Error>> {
                 Key::W => tm.zoom_in(Quadrant::I),
                 Key::Q => tm.zoom_in(Quadrant::II),
                 Key::A => tm.zoom_in(Quadrant::III),
-                Key::R => tm.zoom_in(Quadrant::VI),
+                Key::S => tm.zoom_in(Quadrant::VI),
+                Key::R => tm.zoom_in(Quadrant::VI), // For colemak users
                 Key::Up => tm.travel(Movement::Up),
                 Key::Down => tm.travel(Movement::Down),
                 Key::Right => tm.travel(Movement::Right),
                 Key::Left => tm.travel(Movement::Left),
                 Key::Space => tm.zoom_out(),
+                Key::Minus => tm.zoom_out(),
                 _ => {}
             }
         }
         window.draw_2d(&e, |c, g, _| {
             clear([1.0; 4], g);
-            // image(&tile_texture, c.transform, g);
             if let Some(texture) = &tm.tile_texture {
                 image(texture, c.transform, g);
             }
