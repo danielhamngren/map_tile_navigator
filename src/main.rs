@@ -179,6 +179,7 @@ impl TileManager {
     }
 }
 
+#[derive(Clone, Copy)]
 enum Quadrant {
     I,
     II,
@@ -278,6 +279,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     tm.update_texture();
     let line = Line::new([0.5, 0.5, 0.5, 0.5], 0.5);
+    let mut focus_rect = None;
 
     while let Some(e) = window.next() {
         if let Some(Button::Keyboard(key)) = e.release_args() {
@@ -293,6 +295,18 @@ fn main() -> Result<(), Box<dyn Error>> {
                 Key::Left => tm.travel(Movement::Left),
                 Key::Space => tm.zoom_out(),
                 Key::Minus => tm.zoom_out(),
+                _ => {}
+            }
+            focus_rect = None;
+        }
+
+        if let Some(Button::Keyboard(key)) = e.press_args() {
+            match key {
+                Key::W => focus_rect = Some(Quadrant::I),
+                Key::Q => focus_rect = Some(Quadrant::II),
+                Key::A => focus_rect = Some(Quadrant::III),
+                Key::S => focus_rect = Some(Quadrant::VI),
+                Key::R => focus_rect = Some(Quadrant::VI), // For colemak users
                 _ => {}
             }
         }
@@ -323,8 +337,30 @@ fn main() -> Result<(), Box<dyn Error>> {
                 c.transform,
                 g,
             );
+
+            if let Some(quadrant) = focus_rect {
+                draw_focus_rect(tile_height as f64, tile_width as f64, quadrant, g, &c);
+            }
         });
     }
 
     Ok(())
+}
+
+fn draw_focus_rect<G: Graphics>(
+    tile_height: f64,
+    tile_width: f64,
+    quadrant: Quadrant,
+    g: &mut G,
+    c: &Context,
+) {
+    let rect: [f64; 4];
+    match quadrant {
+        Quadrant::I => rect = [tile_width / 2.0, 0.0, tile_width, tile_height / 2.0],
+        Quadrant::II => rect = [0.0, 0.0, tile_width / 2.0, tile_height / 2.0],
+        Quadrant::III => rect = [0.0, tile_height / 2.0, tile_width / 2.0, tile_height],
+        Quadrant::VI => rect = [tile_width / 2.0, tile_height / 2.0, tile_width, tile_height],
+    }
+
+    rectangle([0.5, 0.5, 0.5, 0.5], rect, c.transform, g);
 }
