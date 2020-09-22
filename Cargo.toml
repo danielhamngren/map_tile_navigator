@@ -2,7 +2,7 @@
 name = "tile-map-navigator"
 version = "0.1.0"
 authors = ["danielhamngren <daniel.hamngren@gmail.com>"]
-license = "AGPL-3.0"
+license = "AGPL-3.0-only"
 keywords = ["WMTS", "GIS"]
 categories = ["visualization"]
 edition = "2018"
