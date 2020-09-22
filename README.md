@@ -2,6 +2,8 @@
 
 This is a simple map visualization tool based on map tiles. The main focus is to be able to show map tiles served using the WMTS standard. For example styles created and served from [Mapbox](https://www.mapbox.com/).
 
+![map tile navigator demo](https://user-images.githubusercontent.com/5391285/93893459-f1a82a00-fced-11ea-9d9d-b41ec426ad71.gif)
+
 ## Running
 
 ```
